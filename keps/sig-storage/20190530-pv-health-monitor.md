@@ -38,6 +38,7 @@ status: provisional
          * [External controller](#external-controller)
          * [External agent](#external-agent)
          * [Simple reactions](#simple-reactions)
+         * [Alternative](#alternative)
       * [Implementation History](#implementation-history)
 
 
@@ -72,24 +73,25 @@ The main architecture is as below:
 
 ![pv health monitor architecture](./pv-health-monitor.png)
 
-First of all, i want to note that we divide the PVs health condition checking into three cases
+First of all, i want to note that we mainly check three aspects at first:
 
 - The health condition checking of PVs themselves, such as if the PV is deleted, if the usage is reaching the threshold...;
 - Attaching conditions checking;
 - Mounting conditions checking.
 
-And in addition, we plan to create a service to receive PV health condition reports from other compoments deployed by users.
+And in addition, we plan to create a service to receive PV health condition reports from other compoments implemented and deployed by users.
 
 Three main parts are involved here in the architecture.
 
-- API change: we plan to introduce a new Taint called PVUnhealthTaint whose key is specific (PVUnhealthMessage) and value can be set differently.
-- External Controller:  responsible for three tasks.
+- API change: we plan to use Annotation to mark PVs if they are unhealthy at the first stage.
+- External Controller:
+  - Check if the network storage is still attached
   - Trigger controller RPC to check the health condition of network PVs themselves for network storage;
   - Watch for node failure events for both network and local storage;
   - Create HTTP(RPC) service to receive PVs health condition reports; 
-- External Agent: responsible for two tasks.
-  - Trigger node RPC  to check PVs’ attaching and mounting conditions for network storage;
-     - Since we want to check attaching per node in order to support multi-attach, put attaching check in node RPC here.
+
+- External Agent:
+  - Trigger node RPC  to check PVs’ mounting conditions for network storage;
   - Trigger controller and node RPC(when ready) to check local PVs health condition for local storage;
     - For now, we do not have CSI support for local storage, we may check the local PVs directly by the agent at first, and then move the checks to RPC interfaces when ready.
 
@@ -100,27 +102,20 @@ Three main parts are involved here in the architecture.
 
 ### API change
 
-We plan to introduce a new Taint called PVUnhealthMessage for PV health condition whose key is specific (PVUnhealthMessage) and value can be set differently. 
+At the first stage, we plan to use annotation to mark PVs if they are unhealthy. 
 
-For example, if the PV is not attached now, we can mark the PV using the PVUnhealthMessage taint like this:
-```
-Key: “PVUnhealthMessage”
-Value: “AttachError,the pv is not attached to node1 now”
-VolumeTaintEffect: NoEffect
-```
+Annotation key can be: `alpha.pv.monitor/unhealthy-messages` and value can be a json string containing all unhealthy details.
 
-If the volume is deleted, we can mark the PV using the PVUnhealthMessage taint like this:
+For example:
 ```
-Key: “PVUnhealthMessage” 
-Value: “VolumeError, the volume is deleted from backend”
-VolumeTaintEffect: NoEffect
+Annotations: 
+    alpha.pv.monitor/unhealthy-messages: {
+        "AttachError": "the pv is not attached to node1 now",
+        ...
+    }
 ```
 
-Note that:
-
-- all the VolumeTaintEffects are NoEffect now at first, we may talk about the reactions later in another proposal;
-- the taint Value is string now, it is theoretically possible that several errors are detected for one PV, we may extend the string to cover this situation: combine the errors together and splited by semicolon or other symbols.
-
+We can also use PV Taints to mark PVs as an alternative, see the alternative section below.
 
 ### CSI change
 
@@ -303,8 +298,33 @@ For now, check local PVs directly by the agent.
 
 For unbound PVCs/PVs,  we need to prevent binding tainted PVs to PVCs.
 
+### Alternative
+
+In addition to PV health annotation, we can also reuse the PV Taints and introduce a new Taint called PVUnhealthMessage for PV health condition whose key is specific (PVUnhealthMessage) and value can be set differently. 
+
+For example, if the PV is not attached now, we can mark the PV using the PVUnhealthMessage taint like this:
+```
+Key: “PVUnhealthMessage”
+Value: “AttachError,the pv is not attached to node1 now”
+VolumeTaintEffect: NoEffect
+```
+
+If the volume is deleted, we can mark the PV using the PVUnhealthMessage taint like this:
+```
+Key: “PVUnhealthMessage” 
+Value: “VolumeError, the volume is deleted from backend”
+VolumeTaintEffect: NoEffect
+```
+
+Note that:
+
+- all the VolumeTaintEffects are NoEffect now at first, we may talk about the reactions later in another proposal;
+- the taint Value is string now, it is theoretically possible that several errors are detected for one PV, we may extend the string to cover this situation: combine the errors together and splited by semicolon or other symbols.
+
 
 ## Implementation History
+
+- 20191021: KEP updated
 
 - 20190730: KEP updated
 
